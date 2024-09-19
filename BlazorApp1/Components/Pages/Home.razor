@@ -1,7 +1,8 @@
 ﻿@page "/"
 @using Microsoft.AspNetCore.Identity;
 @inject IServiceProvider _serviceProvider;
-@inject UserManager<Data.ApplicationUser> UserManager
+@* @inject UserManager<Data.ApplicationUser> UserManager *@
+    @inject AuthenticationStateProvider _authenticationStateProvider;
 
 <PageTitle>Home</PageTitle>
 
@@ -19,12 +20,26 @@
     </Authorized>
 </AuthorizeView>
 
+
+
+
 @code {
+    private bool _isAuthenticated;
+    private bool _isAdmin;
+
+    public bool AuthStatus => _isAuthenticated;
+    public bool AdminStatus => _isAdmin;
+
+
     protected override async Task OnInitializedAsync()
     {
-        //await CreateUserRolesAsync("nienull@gmail.com", "Admin");
+        //await CreateUserRolesAsync("mikk7867@gmail.com", "Admin");
+        var authenticationState = await _authenticationStateProvider.GetAuthenticationStateAsync();
+        var authUser = authenticationState.User;
+        _isAuthenticated = authUser.Identity.IsAuthenticated;
+        _isAdmin = authUser.IsInRole("Admin");
     }
-
+    /*
     public async Task CreateUserRolesAsync(string user, string role)
     {
         var roleManager = _serviceProvider.GetRequiredService<RoleManager<IdentityRole>>();
@@ -36,5 +51,5 @@
 
         Data.ApplicationUser identityUser = await userManager.FindByEmailAsync(user);
         await userManager.AddToRoleAsync(identityUser, role);
-    }
+    }*/
 }
