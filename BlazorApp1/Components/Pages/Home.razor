@@ -1,35 +1,88 @@
 ﻿@page "/"
+@using BlazorApp1.Codes
 @using Microsoft.AspNetCore.Identity;
+@using Microsoft.EntityFrameworkCore;
+@using Models;
 @inject IServiceProvider _serviceProvider;
 @* @inject UserManager<Data.ApplicationUser> UserManager *@
+    
     @inject AuthenticationStateProvider _authenticationStateProvider;
+    @inject Codes.HashingHandler hasher;
+    @inject Codes.SymetricEncrypter symEncrypter;
+    @inject Codes.AsymetricEncrypter asymEncrypter;
+    @inject ToDoContext _dbContext;
+@using Microsoft.AspNetCore.Authorization;
+@attribute [Authorize(Policy = "AuthenticatedUser")]
 
 <PageTitle>Home</PageTitle>
 
-<AuthorizeView>
-    <Authorized>
-        <p>You are logged in!</p>
-    </Authorized>
-    <NotAuthorized>
-        <p>You are NOT logged in!</p>
-    </NotAuthorized>
-</AuthorizeView>
-<AuthorizeView Roles="Admin">
-    <Authorized>
-        <p>You are admin!</p>
-    </Authorized>
-</AuthorizeView>
-
-
-
+<h1>Current User: @_userName</h1>
+@if (!cprGiven)
+{
+    
+    <p>Input CPR number</p>
+    <input type="text" @bind="inputValue" placeholder="DDMMYY-XXXX"/>
+    <button @onclick="SubmitCpr">Submit</button>
+    <p>@variableP</p>
+}
+else 
+{
+    <p>Create Item:</p>
+    <input type="text" @bind="inputItem" placeholder="" />
+    <button @onclick="SubmitItem">Submit Item</button>
+    <div class="d-flex justify-content-center mt-3">
+        <table>
+            <thead>
+                <tr>
+                    <th>ToDoItems:</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var item in _todoItems)
+                {
+                    <tr>
+                        <td>@asymEncrypter.AsymetricDecrypt(@item.Item)</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+    @* <AuthorizeView>
+        <Authorized>
+            <p>You are logged in!</p>
+        </Authorized>
+        <NotAuthorized>
+            <p>You are NOT logged in!</p>
+        </NotAuthorized>
+    </AuthorizeView>
+    <AuthorizeView Roles="Admin">
+        <Authorized>
+            <p>You are admin!</p>
+        </Authorized>
+    </AuthorizeView> *@
+}
 
 @code {
     private bool _isAuthenticated;
     private bool _isAdmin;
 
+    private string _userName;
+    private int cprId;
+
     public bool AuthStatus => _isAuthenticated;
     public bool AdminStatus => _isAdmin;
 
+    List<ToDoList> _todoItems = new List<ToDoList>();
+
+    private string? inputValue;
+    private string? inputItem;
+
+    private bool cprGiven = false;
+    public string variableP = "";
+
+    public bool isRunning = false;
+
+    //private ToDoContext _dbContext;
 
     protected override async Task OnInitializedAsync()
     {
@@ -38,7 +91,103 @@
         var authUser = authenticationState.User;
         _isAuthenticated = authUser.Identity.IsAuthenticated;
         _isAdmin = authUser.IsInRole("Admin");
+        _userName = authUser.Identity.Name;
+
+        // string hash1 = "Niels";
+        // string encrypted = await asymEncrypter.AsymetricEncrypt(hash1);
+        // string decrypted = await asymEncrypter.AsymetricDecrypt(encrypted);
+
     }
+
+    // Method that runs when the submit button is pressed
+    private async void SubmitCpr()
+    {
+        if (isRunning || inputValue == null)
+        {
+            return;
+        }
+        isRunning = true;
+        // variableP = "Test: Loading...";
+        // StateHasChanged();
+        long parsedCpr;
+        string[] splitted = inputValue.Split('-');
+        if ((inputValue.Length == 10 && long.TryParse(inputValue, out parsedCpr)) || (splitted.Length == 2 && splitted[0].Length == 6 && splitted[1].Length == 4 && long.TryParse((splitted[0] + splitted[1]), out parsedCpr)))
+        {
+            bool registered = false;
+            string hashed = hasher.BCryptHashing(parsedCpr.ToString());
+            //grap cpr data from db
+            List<Cpr> cprDb = _dbContext.Cprs.ToList();
+            //filter??
+            foreach (var cprFromDb in cprDb)
+            {
+                if(cprFromDb.User == _userName)//find correct username
+                {
+                    registered = true;
+                    if (hasher.BCryptVerify(inputValue, cprFromDb.CprNr))//if cpr is correct
+                    {
+                        //log in
+                        cprId = cprFromDb.Id;
+                        cprGiven = true;
+                        _todoItems = _dbContext.ToDoLists.Where(x => x.UserId == cprId).ToList();
+                        //variableP = "Test: Correct Cpr";
+                    }
+                    else//if cpr is not correct
+                    {
+                        //do not log in
+                        variableP = "Incorrect CPR number";
+                    }
+                    break;
+                }
+
+            }
+            if(!registered)//if username is not in db
+            {
+                //create new cpr db entry
+                try
+                {
+                    Cpr newUser = new Cpr{ User = _userName, CprNr = hashed };
+                    _dbContext.Cprs.Add(newUser);
+                    await _dbContext.SaveChangesAsync();
+                    List<Cpr> temp = _dbContext.Cprs.Where(x => x.User == _userName).ToList();
+                    cprId = temp[0].Id;
+                    cprGiven = true;
+                    _todoItems = _dbContext.ToDoLists.Where(x => x.UserId == cprId).ToList();
+                    //now find cpr id
+                    //variableP = "Test: New Cpr";
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"Error: {ex.Message}");
+                    variableP = $"Error: {ex.Message}";
+                    throw;
+                }
+            }
+            //variableP = "Your input: " + submittedValue;
+        }
+        else
+        {
+            variableP = "Invalid input";
+        }
+        isRunning = false;
+        StateHasChanged();
+    }
+
+    public async void SubmitItem()
+    {
+        if(inputItem == null)
+        {
+            return;
+        }
+        string encrypted = await asymEncrypter.AsymetricEncrypt(inputItem);
+        //encrypt
+        ToDoList newItem = new ToDoList { UserId = cprId, Item = encrypted };
+        _dbContext.ToDoLists.Add(newItem);
+        await _dbContext.SaveChangesAsync();   
+
+        _todoItems = _dbContext.ToDoLists.Where(x => x.UserId == cprId).ToList();
+        StateHasChanged();
+    }
+
     /*
     public async Task CreateUserRolesAsync(string user, string role)
     {
